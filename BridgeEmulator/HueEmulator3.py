@@ -1935,6 +1935,8 @@ if __name__ == "__main__":
     if bridge_config["deconz"]["enabled"]:
         scanDeconz()
     if bridge_config["emulator"]["mqtt"]["enabled"]:
+        Thread(target=mqtt.mqttServer, args=[bridge_config]).start()
+    if bridge_config["emulator"]["mqtt"]["enabled"]:
         mqtt.mqttServer(bridge_config["emulator"]["mqtt"], bridge_config["lights"], bridge_config["lights_address"], bridge_config["sensors"])
     try:
         if update_lights_on_startup:
