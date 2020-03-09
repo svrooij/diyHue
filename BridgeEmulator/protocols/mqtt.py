@@ -1,13 +1,11 @@
 import json
 import logging
+import random
 import paho.mqtt.client as mqtt
 
 from functions import light_types, nextFreeId
 from functions.colors import hsv_to_rgb
 
-# Mqtt client creation
-# You will need to keep this around, because it will manage all the pushed messages
-client = mqtt.Client()
 
 # Configuration stuff
 discoveryPrefix = "homeassistant"
@@ -58,6 +56,10 @@ def set_light(address, light, data):
             colorFromHsv = True
         if key == "alert":
             state['alert'] = value
+        if key == "transitiontime":
+            state['transition'] = value / 10
+    if "transition" not in state:
+        state['transition'] = 0.4
 
     if colorFromHsv:
         color = hsv_to_rgb(data['hue'], data['sat'], light["state"]["bri"])
@@ -117,41 +119,31 @@ def discover(bridge_config, new_lights):
                 modelid = "LTW001"
             else:
                 modelid = "Plug 01"
-        
+                
             # Create the light with data from auto discovery
-            bridge_config["lights"][new_light_id] = { "name": light_name, "uniqueid": data["unique_id"] }
-            bridge_config["lights"][new_light_id]["manufacturername"] = data["device"]["manufacturer"]
-            bridge_config["lights"][new_light_id]["modelid"] = modelid
-            bridge_config["lights"][new_light_id]["productname"] = data["device"]["model"]
-            bridge_config["lights"][new_light_id]["swversion"] = data["device"]["sw_version"]
-            
-            # Set the type and a base state
-            bridge_config["lights"][new_light_id]["type"] = light_types[modelid]["type"]
-            bridge_config["lights"][new_light_id]["state"] = light_types[modelid]["state"]
-
-            # Some lights have a predefined config
-            bridge_config["lights"][new_light_id]["config"] = light_types[modelid]["config"]
-            
-            # Save the mqtt parameters
-            bridge_config["lights_address"][new_light_id] = { "protocol": "mqtt", "uid": data["unique_id"], "ip":"192.168.0.0" }
-            bridge_config["lights_address"][new_light_id]["state_topic"] = data["state_topic"]
-            bridge_config["lights_address"][new_light_id]["command_topic"] = data["command_topic"]
+            bridge_config["lights"][new_light_id] = {"state": light_types[modelid]["state"], "type": light_types[modelid]["type"], "name": light_name, "uniqueid": "4a:e0:ad:7f:cf:" + str(random.randrange(0, 99)) + "-1", "modelid": modelid, "manufacturername": "Philips", "swversion": light_types[modelid]["swversion"]}
+            new_lights.update({new_light_id: {"name": light_name}})
+            bridge_config["lights_address"][new_light_id] = {"ip": "none", "id": data["unique_id"], "protocol": "mqtt", "state_topic": data["state_topic"], "command_topic": data["command_topic"]}
 
 
-def mqttServer(config, lights, adresses, sensors):
+def mqttServer(bridge_config):
+    client = mqtt.Client(userdata=bridge_config)
     # ================= MQTT CLIENT Connection========================
     # Set user/password on client if supplied
-    if config["mqttUser"] != "" and config["mqttPassword"] != "":
-        client.username_pw_set(config["mqttUser"],config["mqttPassword"])
+    if bridge_config["emulator"]["mqtt"]["mqttUser"] != "" and bridge_config["emulator"]["mqtt"]["mqttPassword"] != "":
+        client.username_pw_set(bridge_config["emulator"]["mqtt"]["mqttUser"],bridge_config["emulator"]["mqtt"]["mqttPassword"])
 
-    if config['discoveryPrefix'] is not None:
-        discoveryPrefix = config['discoveryPrefix']
+    if bridge_config["emulator"]["mqtt"]['discoveryPrefix'] is not None:
+        discoveryPrefix = bridge_config["emulator"]["mqtt"]['discoveryPrefix']
 
     # Setup handlers
     client.on_connect = on_connect
     client.on_message = on_message
     # Connect to the server
-    client.connect(config["mqttServer"], config["mqttPort"])
+    client.connect(bridge_config["emulator"]["mqtt"]["mqttServer"], bridge_config["emulator"]["mqtt"]["mqttPort"])
+    client.subscribe("zigbee2mqtt/+")
+    client.subscribe("zigbee2mqtt/bridge/+")
+
 
     # start the loop to keep receiving data
-    client.loop_start()
+    client.loop_forever()
