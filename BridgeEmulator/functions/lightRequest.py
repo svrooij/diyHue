@@ -220,7 +220,7 @@ def syncWithLights(lights, addresses, users, groups, off_if_unreachable): #updat
             try:
                 protocol_name = addresses[light]["protocol"]
                 for protocol in protocols:
-                    if "protocols." + protocol_name == protocol.__name__:
+                    if protocol_name != "mqtt" and  "protocols." + protocol_name == protocol.__name__:
                         try:
                             light_state = protocol.get_light_state(addresses[light], lights[light])
                             lights[light]["state"].update(light_state)

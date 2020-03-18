@@ -7,6 +7,7 @@ import paho.mqtt.client as mqtt
 
 # internal functions
 from functions import light_types, nextFreeId
+from functions.bridge import BridgeConfig
 from functions.colors import hsv_to_rgb
 
 # Mqtt client creation
@@ -17,6 +18,8 @@ client = mqtt.Client()
 discoveryPrefix = "homeassistant"
 latestStates = {}
 discoveredDevices = {}
+
+device_addresses = {}
 
 # on_connect handler (linked to client below)
 def on_connect(client, userdata, flags, rc):
@@ -39,15 +42,36 @@ def on_message(client, userdata, msg):
 def on_autodiscovery_light(msg):
     data = json.loads(msg.payload)
     logging.info("Auto discovery message on: " + msg.topic)
-    logging.debug(json.dumps(data, indent=4))
+    #logging.debug(json.dumps(data, indent=4))
     client.subscribe(data['state_topic'])
     discoveredDevices[data['unique_id']] = data;
+
+def translate_state_to_hue(mqtt_state):
+    state = { 'reachable': True }
+
+    for key, value in mqtt_state.items():
+        if key == "state":
+            state['on'] = (value == 'ON')
+        if key == "brightness":
+            state['bri'] = value
+        if key == "color":
+            state["colormode"] = "xy"
+            state['xy'] = [value['x'], value['y']]
+
+    return state
 
 def on_state_update(msg):
     logging.info("MQTT: got state message on " + msg.topic)
     data = json.loads(msg.payload)
     latestStates[msg.topic] = data
     logging.debug(json.dumps(data, indent=4))
+    address = device_addresses[msg.topic]
+    if address != None:
+        logging.debug("Push light state " + address)
+        hue = translate_state_to_hue(data)
+        BridgeConfig.getInstance().updateLightState(address, hue)
+    else:
+        logging.info("No light address " + msg.topic)
 
 def set_light(address, light, data):
     state = {"transition": 0.3}
@@ -74,22 +98,14 @@ def set_light(address, light, data):
     logging.debug("MQTT publish to " + address['command_topic'] + " " + message)
     client.publish(address['command_topic'], message)
 
+# This is no longer used
 def get_light_state(address, light):
+    logging.debug("MQTT: get light state " + address['state_topic'])
     if latestStates[address['state_topic']] is None:
         return { 'reachable': False }
     
-    state = { 'reachable': True }
     mqttState = latestStates[address['state_topic']]
-    for key, value in mqttState.items():
-        if key == "state":
-            state['on'] = (value == 'ON')
-        if key == "brightness":
-            state['bri'] = value
-        if key == "color":
-            state["colormode"] = "xy"
-            state['xy'] = [value['x'], value['y']]
-
-    return state
+    return translate_state_to_hue(mqttState)
 
 def discover(bridge_config, new_lights):
     logging.info("MQTT discovery called")
@@ -100,6 +116,7 @@ def discover(bridge_config, new_lights):
                 device_new = False
                 bridge_config["lights_address"][lightkey]["command_topic"] = data["command_topic"]
                 bridge_config["lights_address"][lightkey]["state_topic"] = data["state_topic"]
+                device_addresses[data["state_topic"]] = lightkey
                 break
         
         if device_new:
@@ -127,12 +144,13 @@ def discover(bridge_config, new_lights):
         
             # Create the light with data from auto discovery
             bridge_config["lights"][new_light_id] = { "name": light_name, "uniqueid": "4a:e0:ad:7f:cf:" + str(random.randrange(0, 99)) + "-1" }
-            bridge_config["lights"][new_light_id]["manufacturername"] = data["device"]["manufacturer"]
+            # bridge_config["lights"][new_light_id]["manufacturername"] = data["device"]["manufacturer"]
             bridge_config["lights"][new_light_id]["modelid"] = modelid
             bridge_config["lights"][new_light_id]["productname"] = data["device"]["model"]
             bridge_config["lights"][new_light_id]["swversion"] = data["device"]["sw_version"]
             
             # Set the type, a default state and possibly a light config
+            bridge_config["lights"][new_light_id]["manufacturername"] = light_types[modelid]["manufacturername"]
             bridge_config["lights"][new_light_id]["type"] = light_types[modelid]["type"]
             bridge_config["lights"][new_light_id]["state"] = light_types[modelid]["state"]
             bridge_config["lights"][new_light_id]["config"] = light_types[modelid]["config"]
@@ -144,6 +162,7 @@ def discover(bridge_config, new_lights):
             bridge_config["lights_address"][new_light_id] = { "protocol": "mqtt", "uid": data["unique_id"], "ip":"none" }
             bridge_config["lights_address"][new_light_id]["state_topic"] = data["state_topic"]
             bridge_config["lights_address"][new_light_id]["command_topic"] = data["command_topic"]
+            device_addresses[data["state_topic"]] = new_light_id
 
 
 def mqttServer(config, lights, adresses, sensors):
@@ -154,6 +173,14 @@ def mqttServer(config, lights, adresses, sensors):
 
     if config['discoveryPrefix'] is not None:
         discoveryPrefix = config['discoveryPrefix']
+
+    for address in adresses.keys():
+        if adresses[address]["protocol"] == "mqtt":
+            # Save state topics to object where the key is the topic and the value is the address.
+            topic = adresses[address]["state_topic"]
+            if topic != None:
+                logging.debug("Topic " + topic + " has address " + address)
+                device_addresses[topic] = address;
 
     # Setup handlers
     client.on_connect = on_connect
