@@ -11,6 +11,7 @@ import ssl
 import sys
 import requests
 import uuid
+from functions.bridge import BridgeConfig
 from collections import defaultdict
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -188,6 +189,8 @@ def initialize():
     ## generte security key for Hue Essentials remote access
     if "Hue Essentials key" not in bridge_config["config"]:
         bridge_config["config"]["Hue Essentials key"] = str(uuid.uuid1()).replace('-', '')
+    c = BridgeConfig.getInstance()
+    c.setConfig(bridge_config)
 
 def sanitizeBridgeScenes():
     for scene in list(bridge_config["scenes"]):
@@ -1529,7 +1532,9 @@ class S(BaseHTTPRequestHandler):
                                 scenelist["scenes"][scene]["lights"] = bridge_config["groups"][bridge_config["scenes"][scene]["group"]]["lights"]
                         self._set_end_headers(bytes(json.dumps(scenelist["scenes"],separators=(',', ':'),ensure_ascii=False), "utf8"))
                     else:
-                        self._set_end_headers(bytes(json.dumps(bridge_config[url_pices[3]],separators=(',', ':'),ensure_ascii=False), "utf8"))
+                        logging.debug('Get something from api ' + url_pices[3])
+                        # self._set_end_headers(bytes(json.dumps(bridge_config[url_pices[3]],separators=(',', ':'),ensure_ascii=False), "utf8"))
+                        self._set_end_headers(bytes(json.dumps(BridgeConfig.getInstance().getPartialConfig(url_pices[3]),separators=(',', ':'),ensure_ascii=False), "utf8"))
                 elif (len(url_pices) == 5 or (len(url_pices) == 6 and url_pices[5] == 'state')):
                     if url_pices[4] == "new": #return new lights and sensors only
                         new_lights.update({"lastscan": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")})
